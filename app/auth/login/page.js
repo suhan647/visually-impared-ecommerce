@@ -1,54 +1,63 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth } from "@/lib/firebase";
-import { speak } from "@/lib/speech";
-import { useRouter } from "next/navigation";
+import { useAuth } from "@/app/context/AuthContext";
 
 export default function LoginPage() {
+  const router = useRouter();
+  const { user } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const router = useRouter();
+  const [error, setError] = useState("");
 
-  const handleLogin = async () => {
+  useEffect(() => {
+    console.log("User state changed:", user);
+    if (user) {
+      console.log("User email:", user.email);
+      console.log("Redirecting to:", user.email === "suhanahmed647@gmail.com" ? "/dashboard" : "/user");
+      router.push(user.email === "suhanahmed647@gmail.com" ? "/dashboard" : "/user");
+    }
+  }, [user, router]);
+  
+
+  const handleLogin = async (e) => {
+    console.log('clicked')
+    e.preventDefault();
     try {
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      const user = userCredential.user;
-
-      speak("Login successful. Redirecting you now.");
-      setTimeout(() => {
-        router.push("/dashboard"); // Redirect to dashboard after login
-      }, 2000);
-    } catch (error) {
-      speak("Login failed. Please check your email and password.");
-      console.error("Login error:", error);
+      await signInWithEmailAndPassword(auth, email, password);
+      console.log("Login successful");
+    } catch (err) {
+      console.error("Login error:", err);
+      setError("Invalid email or password");
     }
   };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100">
-      <h1 className="text-2xl font-bold mb-4">Login</h1>
-      <input
-        type="email"
-        placeholder="Email"
-        className="p-2 border rounded mb-2 w-64"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-      />
-      <input
-        type="password"
-        placeholder="Password"
-        className="p-2 border rounded mb-2 w-64"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-      />
-      <button
-        onClick={handleLogin}
-        className="p-2 bg-blue-500 text-white rounded"
-      >
-        Login
-      </button>
+    <div className="flex flex-col items-center">
+      <h1 className="text-2xl">Login</h1>
+      {error && <p className="text-red-500">{error}</p>}
+      <form onSubmit={handleLogin} className="flex flex-col gap-2">
+        <input
+          type="email"
+          placeholder="Email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+        />
+        <input
+          type="password"
+          placeholder="Password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+        />
+        <button type="submit" className="bg-blue-500 text-white p-2 rounded">
+          Login
+        </button>
+      </form>
     </div>
   );
 }
