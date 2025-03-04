@@ -1,25 +1,14 @@
-"use client";
+'use client';
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { useAuth } from "@/context/AuthContext";
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 
-export default function Dashboard() {
-  const { user, loading } = useAuth();
+export default function DashboardPage() {
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading && (!user || user.email !== "suhanahmed647@gmail.com")) {
-      router.push("/auth/login");
-    }
-  }, [user, loading, router]);
+    router.push('/dashboard/users'); // Redirect to Users Page by Default
+  }, [router]);
 
-  if (loading) return <p>Loading...</p>;
-
-  return (
-    <div>
-      <h1 className="text-3xl font-bold">Admin Dashboard</h1>
-      <p>Welcome, {user?.email}</p>
-    </div>
-  );
+  return null; // No UI needed here
 }
