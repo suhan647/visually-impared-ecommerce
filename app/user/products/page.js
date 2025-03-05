@@ -1,9 +1,9 @@
 'use client'
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { getFirestore, collection, getDocs, getDoc } from 'firebase/firestore';
 import { app } from '@/lib/firebase';
-import { speak } from '@/lib/speech';
-import { FaShoppingCart, FaEye, FaAdjust } from 'react-icons/fa';
+import { speak, stopSpeaking } from '@/lib/speech';
+import { FaShoppingCart, FaEye, FaAdjust, FaArrowRight, FaArrowLeft } from 'react-icons/fa';
 import { doc, setDoc } from 'firebase/firestore';
 import { useAuth } from '@/app/context/AuthContext';
 
@@ -13,7 +13,10 @@ export default function AccessibleProductsPage() {
   const [filteredProducts, setFilteredProducts] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
+  const [currentProductIndex, setCurrentProductIndex] = useState(0);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
+  const productRefs = useRef({});
   const db = getFirestore(app);
   const { user } = useAuth();
 
@@ -27,22 +30,38 @@ export default function AccessibleProductsPage() {
           return {
             id: doc.id,
             ...data,
-            price: Number(data.price) || 0, // Ensure price is a number
-            stock: Number(data.stock) || 0 // Ensure stock is a number
+            price: Number(data.price) || 0,
+            stock: Number(data.stock) || 0
           };
         });
         setProducts(productsList);
         setFilteredProducts(productsList);
-        speak(`Loaded ${productsList.length} products`);
+  
+        if (isInitialLoad) {
+          stopSpeaking();
+          speak(`Welcome to our Products Page. We have ${productsList.length} products available for you to explore.`);
+          
+          if (productsList.length > 0) {
+            setTimeout(() => {
+              speakProductDetails(productsList[0]);
+            }, 2000);
+          }
+          
+          setIsInitialLoad(false);
+        }
       } catch (error) {
         console.error("Error fetching products:", error);
         speak("Error fetching products. Please try again.");
       }
     };
+  
     fetchProducts();
-  }, []);
+  
+    return () => {
+      stopSpeaking();
+    };
+  }, [isInitialLoad]);
 
-  // Filter products based on search and category
   useEffect(() => {
     let result = products;
 
@@ -58,12 +77,26 @@ export default function AccessibleProductsPage() {
     }
 
     setFilteredProducts(result);
+    setCurrentProductIndex(0);
   }, [searchTerm, selectedCategory, products]);
+
+  const speakProductDetails = (product) => {
+    stopSpeaking();
+    speak(`Product: ${product.name}. Price: ${product.price} dollars. Category: ${product.category}. Stock: ${product.stock} items available.`);
+  };
 
   const toggleHighContrast = () => {
     const newMode = !highContrastMode;
     setHighContrastMode(newMode);
     speak(newMode ? "High contrast mode enabled" : "High contrast mode disabled");
+  };
+
+  const handleKeyboardNavigation = (e) => {
+    if (e.key === 'Enter') {
+      const nextIndex = (currentProductIndex + 1) % filteredProducts.length;
+      setCurrentProductIndex(nextIndex);
+      speakProductDetails(filteredProducts[nextIndex]);
+    }
   };
 
   const addToCart = async (product) => {
@@ -85,33 +118,39 @@ export default function AccessibleProductsPage() {
 
       await setDoc(cartRef, { items: cartItems });
 
-      speak(`Added ${product.name} to cart`);
+      // Speak when product is added to cart
+      stopSpeaking();
+      speak(`${product.name} has been added to your cart`);
     } catch (error) {
       console.error("Error adding to cart:", error);
       speak("Error adding product to cart. Please try again.");
     }
   };
 
-  // Get unique categories
   const categories = ['All', ...new Set(products.map(product => product.category))];
 
-  const ProductCard = ({ product }) => {
-    const handleProductInteraction = () => {
-      speak(`Product: ${product.name}, Category: ${product.category}, Price: ${product.price}, Stock: ${product.stock}`);
+  const ProductCard = ({ product, index }) => {
+    const handleImageHover = () => {
+      speakProductDetails(product);
     };
 
     return (
       <div
+        ref={el => productRefs.current[index] = el}
+        tabIndex={0}
         className={`
-          group relative bg-white shadow-lg rounded-xl overflow-hidden
+          group relative bg-white shadow-lg rounded-2xl overflow-hidden
           transition-all duration-300 hover:shadow-2xl
+          focus:outline-none focus:ring-4 
           ${highContrastMode ? 'border-2 border-blue-500' : 'hover:-translate-y-2'}
+          ${index === currentProductIndex ? 'ring-4 ring-blue-300' : ''}
         `}
       >
         <div className="relative overflow-hidden">
           <img
             src={product.imageUrl}
             alt={product.name}
+            onMouseEnter={handleImageHover}
             className="w-full h-64 object-cover transition-transform duration-300 group-hover:scale-110"
           />
           <div className="absolute inset-0 bg-black opacity-0 group-hover:opacity-20 transition-opacity duration-300"></div>
@@ -172,7 +211,7 @@ export default function AccessibleProductsPage() {
               <FaShoppingCart className="mr-2" /> Add to Cart
             </button>
             <button
-              onClick={handleProductInteraction}
+              onClick={() => speakProductDetails(product)}
               className={`
                 p-3 rounded-lg
                 transition-all duration-300
@@ -191,6 +230,8 @@ export default function AccessibleProductsPage() {
 
   return (
     <div
+      tabIndex={0}
+      onKeyDown={handleKeyboardNavigation}
       className={`
         min-h-screen py-12 px-6
         ${highContrastMode
@@ -198,12 +239,11 @@ export default function AccessibleProductsPage() {
           : 'bg-gray-50'}
       `}
     >
-      {/* Header and Controls */}
       <div className="max-w-7xl mx-auto mb-12">
         <div className="flex justify-between items-center mb-8">
           <h1
             className={`
-              text-4xl font-bold
+              text-4xl font-bold tracking-tight
               ${highContrastMode ? 'text-blue-400' : 'text-gray-800'}
             `}
           >
@@ -211,14 +251,14 @@ export default function AccessibleProductsPage() {
           </h1>
 
           <div className="flex items-center space-x-4">
-            {/* High Contrast Toggle */}
             <button
               onClick={toggleHighContrast}
+              aria-label={highContrastMode ? "Disable High Contrast" : "Enable High Contrast"}
               className={`
-                p-2 rounded-full
+                p-2 rounded-full transition-colors duration-300
                 ${highContrastMode
-                  ? 'bg-blue-500 text-white'
-                  : 'bg-gray-200 text-gray-700'}
+                  ? 'bg-blue-500 text-white hover:bg-blue-600'
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}
               `}
             >
               <FaAdjust />
@@ -226,7 +266,6 @@ export default function AccessibleProductsPage() {
           </div>
         </div>
 
-        {/* Search and Filter */}
         <div className="flex space-x-4 mb-8">
           <input
             type="text"
@@ -235,6 +274,7 @@ export default function AccessibleProductsPage() {
             onChange={(e) => setSearchTerm(e.target.value)}
             className={`
               flex-1 px-4 py-3 rounded-lg
+              transition-all duration-300 focus:ring-4 focus:ring-blue-200
               ${highContrastMode
                 ? 'bg-gray-800 text-white border-blue-500 border'
                 : 'bg-white border border-gray-300'}
@@ -245,9 +285,10 @@ export default function AccessibleProductsPage() {
             onChange={(e) => setSelectedCategory(e.target.value)}
             className={`
               px-4 py-3 rounded-lg
+              transition-all duration-300 focus:ring-4 focus:ring-blue-200
               ${highContrastMode
                 ? 'bg-gray-800 text-white border-blue-500 border'
-                : 'bg-white border border-gray-300'}
+                : 'bg-white border border[SystemGrayLight2]'}
             `}
           >
             {categories.map(category => (
@@ -259,7 +300,6 @@ export default function AccessibleProductsPage() {
         </div>
       </div>
 
-      {/* Product Grid */}
       <div className="max-w-7xl mx-auto">
         {filteredProducts.length === 0 ? (
           <div
@@ -271,11 +311,24 @@ export default function AccessibleProductsPage() {
             No products found.
           </div>
         ) : (
-          <div className="grid grid-cols-1  md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
-            {filteredProducts.map(product => (
-              <ProductCard key={product.id} product={product} />
-            ))}
-          </div>
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
+              {filteredProducts.map((product, index) => (
+                <ProductCard 
+                  key={product.id} 
+                  product={product} 
+                  index={index}
+                />
+              ))}
+            </div>
+            
+            <div className="text-center mt-8 text-sm text-gray-500">
+              <p>
+                Press <kbd className="bg-gray-200 px-2 py-1 rounded mx-1">Enter</kbd> 
+                to navigate through products
+              </p>
+            </div>
+          </>
         )}
       </div>
     </div>

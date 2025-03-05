@@ -1,131 +1,198 @@
-'use client'
-import React, { useState, useEffect } from 'react';
-import { getFirestore, collection, getDocs, getDoc } from 'firebase/firestore';
+'use client';
+import React, { useEffect, useState } from 'react';
+import { getFirestore, doc, getDoc, updateDoc, setDoc } from 'firebase/firestore';
 import { app } from '@/lib/firebase';
-import { speak } from '@/lib/speech';
-import { FaShoppingCart, FaEye, FaAdjust } from 'react-icons/fa';
-import { doc, setDoc } from 'firebase/firestore';
 import { useAuth } from '@/app/context/AuthContext';
+import { FaTrash, FaPlus, FaMinus, FaShoppingCart } from 'react-icons/fa';
+import { motion } from 'framer-motion';
+import { speak, stopSpeaking } from '@/lib/speech';
 
-export default function AccessibleProductsPage() {
-  const [products, setProducts] = useState([]);
-  const [highContrastMode, setHighContrastMode] = useState(false);
-  const [filteredProducts, setFilteredProducts] = useState([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('All');
-
+export default function CartPage() {
+  const [cartItems, setCartItems] = useState([]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
   const db = getFirestore(app);
   const { user } = useAuth();
 
   useEffect(() => {
-    const fetchProducts = async () => {
-      try {
-        const productsCollection = collection(getFirestore(app), "products");
-        const productsSnapshot = await getDocs(productsCollection);
-        const productsList = productsSnapshot.docs.map(doc => {
-          const data = doc.data();
-          return {
-            id: doc.id,
-            ...data,
-            price: Number(data.price) || 0,
-            stock: Number(data.stock) || 0
-          };
-        });
-        setProducts(productsList);
-        setFilteredProducts(productsList);
-        speak(`Loaded ${productsList.length} products`);
-      } catch (error) {
-        console.error("Error fetching products:", error);
-        speak("Error fetching products. Please try again.");
+    if (user) {
+      fetchCartItems(user.uid);
+    }
+  }, [user]);
+
+  const fetchCartItems = async (userId) => {
+    try {
+      const cartRef = doc(db, "carts", userId);
+      const cartDoc = await getDoc(cartRef);
+      if (cartDoc.exists()) {
+        const items = Object.values(cartDoc.data().items || {});
+        setCartItems(items);
+        stopSpeaking();
+        speakCartDetails(items);
       }
-    };
-    fetchProducts();
-  }, []);
-
-  useEffect(() => {
-    let result = products;
-
-    if (selectedCategory !== 'All') {
-      result = result.filter(product => product.category === selectedCategory);
+    } catch (error) {
+      console.error("Error fetching cart:", error);
     }
-
-    if (searchTerm) {
-      result = result.filter(product =>
-        product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        product.category.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    }
-
-    setFilteredProducts(result);
-  }, [searchTerm, selectedCategory, products]);
-
-  const toggleHighContrast = () => {
-    const newMode = !highContrastMode;
-    setHighContrastMode(newMode);
-    speak(newMode ? "High contrast mode enabled" : "High contrast mode disabled");
   };
 
-  const addToCart = async (product) => {
-    if (!user) {
-      speak("Please log in to add items to the cart.");
+  const speakCartDetails = (items) => {
+    if (items.length === 0) {
+      speak("Cart Page. Your cart is empty.");
       return;
     }
 
-    const userId = user.uid;
-    const cartRef = doc(db, "carts", userId);
+    // Announce page name and number of items
+    let message = `Cart Page. You have ${items.length} items in your cart. `;
+    
+    // Add each item's name and quantity
+    items.forEach((item, index) => {
+      message += `Item ${index + 1}: ${item.name}, quantity ${item.quantity}. `;
+    });
 
+    // Calculate and add total price
+    let totalPrice = items.reduce((total, item) => total + item.price * item.quantity, 0).toFixed(2);
+    message += `Total price: ${totalPrice} dollars.`;
+    
+    speak(message);
+  };
+
+  const updateQuantity = async (productId, newQuantity) => {
+    if (newQuantity < 1) return;
     try {
+      const cartRef = doc(db, "carts", user.uid);
       const cartDoc = await getDoc(cartRef);
-      let cartItems = cartDoc.exists() ? cartDoc.data().items || {} : {};
+      if (!cartDoc.exists()) return;
+      let cartData = cartDoc.data().items;
+      const itemName = cartData[productId].name;
+      cartData[productId].quantity = newQuantity;
+      await updateDoc(cartRef, { items: cartData });
+      setCartItems(Object.values(cartData));
 
-      cartItems[product.id] = cartItems[product.id]
-        ? { ...cartItems[product.id], quantity: cartItems[product.id].quantity + 1 }
-        : { ...product, quantity: 1 };
-
-      await setDoc(cartRef, { items: cartItems });
-      speak(`Added ${product.name} to cart`);
+      stopSpeaking();
+      speak(`Quantity of ${itemName} updated to ${newQuantity}.`);
     } catch (error) {
-      console.error("Error adding to cart:", error);
-      speak("Error adding product to cart. Please try again.");
+      console.error("Error updating quantity:", error);
     }
   };
 
-  const categories = ['All', ...new Set(products.map(product => product.category))];
+  const removeFromCart = async (productId) => {
+    try {
+      const cartRef = doc(db, "carts", user.uid);
+      const cartDoc = await getDoc(cartRef);
+      if (!cartDoc.exists()) return;
+      let cartData = cartDoc.data().items;
+      const itemName = cartData[productId].name;
+      delete cartData[productId];
+      await updateDoc(cartRef, { items: cartData });
+      setCartItems(Object.values(cartData));
 
-  const ProductCard = ({ product }) => {
-    const handleProductInteraction = () => {
-      speak(`Product: ${product.name}, Category: ${product.category}, Price: ${product.price}, Stock: ${product.stock}`);
-    };
+      stopSpeaking();
+      speak(`${itemName} has been removed from your cart.`);
+    } catch (error) {
+      console.error("Error removing product:", error);
+    }
+  };
 
-    return (
-      <div className={`group relative bg-white shadow-lg rounded-2xl overflow-hidden transition-all duration-300 hover:shadow-xl hover:-translate-y-2 border ${highContrastMode ? 'border-blue-500 bg-gray-900 text-white' : 'border-gray-200'}`}>
-        <div className="relative overflow-hidden">
-          <img src={product.imageUrl} alt={product.name} className="w-full h-64 object-cover transition-transform duration-300 group-hover:scale-110" />
-        </div>
-        <div className="p-6">
-          <h3 className={`text-xl font-bold truncate ${highContrastMode ? 'text-blue-300' : 'text-gray-800'}`}>{product.name}</h3>
-          <p className={`text-lg font-semibold mt-2 ${highContrastMode ? 'text-blue-300' : 'text-green-600'}`}>${(product.price || 0).toFixed(2)}</p>
-          <p className={`text-sm ${highContrastMode ? 'text-gray-300' : 'text-gray-500'}`}>{product.stock || 0} in stock</p>
-          <div className="flex mt-4 space-x-3">
-            <button onClick={() => addToCart(product)} className="flex-1 py-3 rounded-lg bg-blue-500 text-white font-bold uppercase tracking-wide hover:bg-blue-600 transition-all"><FaShoppingCart className="mr-2" /> Add to Cart</button>
-            <button onClick={handleProductInteraction} className="p-3 rounded-lg bg-gray-200 text-blue-600 hover:bg-gray-300 transition-all"><FaEye /></button>
-          </div>
-        </div>
-      </div>
-    );
+  const getTotalPrice = () => {
+    return cartItems.reduce((total, item) => total + item.price * item.quantity, 0).toFixed(2);
+  };
+
+  const handleCheckout = () => {
+    stopSpeaking();
+    speak("Checkout completed. Your order has been placed successfully.");
+    setIsModalOpen(true);
+  };
+
+  const handleModalClose = async () => {
+    try {
+      const cartRef = doc(db, "carts", user.uid);
+      await setDoc(cartRef, { items: {} });
+      setCartItems([]);
+      setIsModalOpen(false);
+      stopSpeaking();
+      // Removed the "Your cart has been cleared" speech
+    } catch (error) {
+      console.error("Error clearing cart:", error);
+    }
   };
 
   return (
-    <div className={`min-h-screen py-12 px-6 ${highContrastMode ? 'bg-gray-900 text-white' : 'bg-gray-50'}`}>
-      <div className="max-w-7xl mx-auto mb-12">
-        <div className="flex justify-between items-center mb-8">
-          <h1 className={`text-4xl font-bold ${highContrastMode ? 'text-blue-400' : 'text-gray-800'}`}>Our Products</h1>
-          <button onClick={toggleHighContrast} className="p-3 rounded-full bg-gray-200 text-gray-700 hover:bg-gray-300"><FaAdjust /></button>
+    <div className="min-h-screen bg-gray-100 p-6">
+      <motion.h1 
+        initial={{ opacity: 0, y: -20 }} 
+        animate={{ opacity: 1, y: 0 }} 
+        className="text-4xl font-bold text-center mb-6 text-gray-800"
+      >
+        🛒 Your Cart
+      </motion.h1>
+
+      {cartItems.length === 0 ? (
+        <p className="text-lg text-gray-600 text-center">Your cart is empty.</p>
+      ) : (
+        <div className="max-w-4xl mx-auto bg-white p-6 rounded-lg shadow-lg">
+          <div className="grid grid-cols-1 gap-6">
+            {cartItems.map((item) => (
+              <motion.div 
+                key={item.id} 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex items-center justify-between p-4 bg-gray-50 rounded-lg shadow-md"
+              >
+                <img src={item.imageUrl} alt={item.name} className="w-20 h-20 object-cover rounded-md" />
+                <div className="flex-1 px-4">
+                  <h2 className="text-lg font-bold">{item.name}</h2>
+                  <p className="text-gray-600">${item.price}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button 
+                    className="p-2 bg-gray-200 rounded-md" 
+                    onClick={() => updateQuantity(item.id, item.quantity - 1)}
+                  >
+                    <FaMinus />
+                  </button>
+                  <span className="text-lg font-bold">{item.quantity}</span>
+                  <button 
+                    className="p-2 bg-gray-200 rounded-md" 
+                    onClick={() => updateQuantity(item.id, item.quantity + 1)}
+                  >
+                    <FaPlus />
+                  </button>
+                </div>
+                <button 
+                  className="p-2 bg-red-500 text-white rounded-md"
+                  onClick={() => removeFromCart(item.id)}
+                >
+                  <FaTrash />
+                </button>
+              </motion.div>
+            ))}
+          </div>
+          
+          <div className="mt-6 border-t pt-4">
+            <h2 className="text-2xl font-bold text-center">Total: ${getTotalPrice()}</h2>
+            <button 
+              className="mt-4 p-3 w-full bg-green-500 text-white rounded-lg flex items-center justify-center text-lg font-bold shadow-md hover:bg-green-600 transition"
+              onClick={handleCheckout}
+            >
+              <FaShoppingCart className="mr-2" /> Checkout
+            </button>
+          </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
-          {filteredProducts.length === 0 ? <p className="text-center text-gray-500">No products found.</p> : filteredProducts.map(product => <ProductCard key={product.id} product={product} />)}
+      )}
+
+      {isModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+          <div className="bg-white p-6 rounded-lg shadow-lg max-w-sm w-full">
+            <h2 className="text-2xl font-bold mb-4 text-green-600">Order Placed!</h2>
+            <p className="text-gray-700 mb-6">Your order has been placed successfully.</p>
+            <button 
+              className="w-full p-3 bg-blue-500 text-white rounded-lg font-bold hover:bg-blue-600 transition"
+              onClick={handleModalClose}
+            >
+              OK
+            </button>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
